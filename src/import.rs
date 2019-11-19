@@ -1,12 +1,12 @@
-use bellman::{
+use r1cs_core::{
     ConstraintSystem,
     LinearCombination,
     SynthesisError,
     Variable,
 };
-use ff::{Field, PrimeField, PrimeFieldRepr};
-use pairing::Engine;
-use sapling_crypto::circuit::num::AllocatedNum;
+use algebra::{FromBytes, PrimeField, BigInteger};
+use r1cs_std::fields::{FieldGadget, fp::FpGadget};
+use r1cs_std::prelude::*;
 use std::collections::HashMap;
 use zkinterface::{
     reading::{Constraint, Messages, Term},
@@ -15,24 +15,23 @@ use zkinterface::{
 
 
 /// Convert zkInterface little-endian bytes to bellman Fr.
-pub fn le_to_fr<E: Engine>(bytes_le: &[u8]) -> E::Fr {
+pub fn le_to_fr<F: PrimeField>(bytes_le: &[u8]) -> F {
     if bytes_le.len() == 0 {
-        return E::Fr::zero();
+        return F::zero();
     }
 
-    let mut repr = <E::Fr as PrimeField>::Repr::default();
     let mut bytes_le = Vec::from(bytes_le);
-    let words = (E::Fr::NUM_BITS + 63) / 64;
+    let words = (F::size_in_bits() + 63) / 64;
     bytes_le.resize(8 * words as usize, 0);
-    repr.read_le(&bytes_le as &[u8]).unwrap();
-    E::Fr::from_repr(repr).unwrap()
+    let repr = FromBytes::read(bytes_le.as_slice()).unwrap();
+    F::from_repr(repr)
 }
 
 /// Convert zkInterface terms to bellman LinearCombination.
-pub fn terms_to_lc<E: Engine>(vars: &HashMap<u64, Variable>, terms: &[Term]) -> LinearCombination<E> {
+pub fn terms_to_lc<F: PrimeField>(vars: &HashMap<u64, Variable>, terms: &[Term]) -> LinearCombination<F> {
     let mut lc = LinearCombination::zero();
     for term in terms {
-        let coeff = le_to_fr::<E>(term.value);
+        let coeff = le_to_fr::<F>(term.value);
         let var = vars.get(&term.id).unwrap().clone();
         lc = lc + (coeff, var);
     }
@@ -40,9 +39,9 @@ pub fn terms_to_lc<E: Engine>(vars: &HashMap<u64, Variable>, terms: &[Term]) -> 
 }
 
 /// Enforce a zkInterface constraint in bellman CS.
-pub fn enforce<E, CS>(cs: &mut CS, vars: &HashMap<u64, Variable>, constraint: &Constraint)
-    where E: Engine,
-          CS: ConstraintSystem<E>
+pub fn enforce<F: PrimeField, CS>(cs: &mut CS, vars: &HashMap<u64, Variable>, constraint: &Constraint)
+    where 
+          CS: ConstraintSystem<F>
 {
     cs.enforce(|| "",
                |_| terms_to_lc(vars, &constraint.a),
@@ -52,14 +51,11 @@ pub fn enforce<E, CS>(cs: &mut CS, vars: &HashMap<u64, Variable>, constraint: &C
 }
 
 /// Call a foreign gadget through zkInterface.
-pub fn call_gadget<E, CS>(
+pub fn call_gadget<F: PrimeField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
-    inputs: &[AllocatedNum<E>],
-    exec_fn: &Fn(&[u8]) -> Result<Messages, String>,
-) -> Result<(Vec<AllocatedNum<E>>), SynthesisError>
-    where E: Engine,
-          CS: ConstraintSystem<E>
-{
+    inputs: &[FpGadget<F>],
+    exec_fn: & dyn Fn(&[u8]) -> Result<Messages, String>,
+) -> Result<(Vec<FpGadget<F>>), SynthesisError> {
     let witness_generation = inputs.len() > 0 && inputs[0].get_value().is_some();
 
     // Serialize input values.
@@ -109,10 +105,10 @@ pub fn call_gadget<E, CS>(
     // Allocate outputs, with optional values.
     if let Some(output_vars) = messages.connection_variables() {
         for var in output_vars {
-            let num = AllocatedNum::alloc(
-                cs.namespace(|| format!("output_{}", var.id)), || {
-                    Ok(le_to_fr::<E>(var.value))
-                })?;
+            let num = FpGadget::alloc(
+                cs.ns(|| format!("output_{}", var.id)), 
+                || Ok(le_to_fr::<F>(var.value))
+            )?;
 
             // Track output variable.
             id_to_var.insert(var.id, num.get_variable());
@@ -124,10 +120,10 @@ pub fn call_gadget<E, CS>(
     let private_vars = messages.private_variables().unwrap();
 
     for var in private_vars {
-        let num = AllocatedNum::alloc(
-            cs.namespace(|| format!("local_{}", var.id)), || {
-                Ok(le_to_fr::<E>(var.value))
-            })?;
+        let num = FpGadget::alloc(
+            cs.ns(|| format!("local_{}", var.id)), 
+            || Ok(le_to_fr::<F>(var.value))
+        )?;
 
         // Track private variable.
         id_to_var.insert(var.id, num.get_variable());
@@ -135,7 +131,7 @@ pub fn call_gadget<E, CS>(
 
     // Add gadget constraints.
     for (i, constraint) in messages.iter_constraints().enumerate() {
-        enforce(&mut cs.namespace(|| format!("constraint_{}", i)), &id_to_var, &constraint);
+        enforce(&mut cs.ns(|| format!("constraint_{}", i)), &id_to_var, &constraint);
     }
 
     Ok(outputs)

@@ -1,7 +1,7 @@
 [package]
-name = "zkinterface_bellman"
+name = "zkinterface-zexe"
 version = "0.1.0"
-authors = ["Aurélien Nicolas <aurel@qed-it.com>"]
+authors = ["Aurélien Nicolas <aurel@qed-it.com>", "Pratyush Mishra <pratyush@berkeley.edu>"]
 edition = "2018"
 
 [lib]
@@ -9,16 +9,15 @@ name = "zkinterface_bellman"
 path = "src/lib.rs"
 
 [[bin]]
-name = "bellman_prover"
+name = "gm17_prover"
 path = "src/bin.rs"
 
 [dependencies]
 num-bigint = "0.2.2"
-ff = { git = "https://github.com/zcash/librustzcash" }
-pairing = { git = "https://github.com/zcash/librustzcash" } # "0.14.2"
-bellman = { git = "https://github.com/zcash/librustzcash" } # "0.1.0"
-sapling-crypto = { git = "https://github.com/zcash/librustzcash" }
-rand = "0.4"
+algebra = { git = "https://github.com/scipr-lab/zexe" }
+r1cs-core = { git = "https://github.com/scipr-lab/zexe" } # "0.14.2"
+r1cs-std = { git = "https://github.com/scipr-lab/zexe" } # "0.14.2"
+rand = "0.7"
 zkinterface = "1.0.6"
 
 [dev-dependencies]
