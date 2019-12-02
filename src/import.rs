@@ -3,6 +3,7 @@ use r1cs_core::{
     LinearCombination,
     SynthesisError,
     Variable,
+    ConstraintVar,
 };
 use algebra::{FromBytes, PrimeField, BigInteger};
 use r1cs_std::fields::{FieldGadget, fp::FpGadget};
@@ -91,7 +92,7 @@ pub fn call_gadget<F: PrimeField, CS: ConstraintSystem<F>>(
     let messages = exec_fn(&call_buf).or(Err(SynthesisError::Unsatisfiable))?;
 
     // Track variables by id. Used to convert constraints.
-    let mut id_to_var = HashMap::<u64, Variable>::new();
+    let mut id_to_var = HashMap::<u64, ConstraintVar<F>>::new();
 
     id_to_var.insert(0, CS::one());
 
@@ -120,13 +121,9 @@ pub fn call_gadget<F: PrimeField, CS: ConstraintSystem<F>>(
     let private_vars = messages.private_variables().unwrap();
 
     for var in private_vars {
-        let num = FpGadget::alloc(
-            cs.ns(|| format!("local_{}", var.id)), 
-            || Ok(le_to_fr::<F>(var.value))
-        )?;
-
+        let alloc_var = cs.alloc(|| format!("local_{}", var.id), || Ok(le_to_fr::<F>(var.value)))?;
         // Track private variable.
-        id_to_var.insert(var.id, num.get_variable());
+        id_to_var.insert(var.id, alloc_var);
     };
 
     // Add gadget constraints.

@@ -1,17 +1,12 @@
-use bellman::{
-    Circuit,
+use r1cs_core::{
+    ConstraintSynthesizer,
     ConstraintSystem,
-    groth16::{
-        create_random_proof,
-        generate_random_parameters,
-        Parameters,
-    },
     SynthesisError,
     Variable,
 };
-use pairing::{bls12_381::Bls12, Engine};
+use algebra::{Field, PairingEngine};
 use rand::OsRng;
-use sapling_crypto::circuit::num::AllocatedNum;
+use r1cs_std::circuit::num::AllocatedNum;
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::Path;
@@ -25,9 +20,8 @@ pub struct ZKIFCircuit<'a> {
     pub messages: &'a Messages,
 }
 
-impl<'a, E: Engine> Circuit<E> for ZKIFCircuit<'a> {
-    fn synthesize<CS: ConstraintSystem<E>>(self, cs: &mut CS) -> Result<(), SynthesisError>
-    {
+impl<'a, F: Field> ConstraintSynthesizer<F> for ZKIFCircuit<'a> {
+    fn generate_constraints<CS: ConstraintSystem<F>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
         // Track variables by id. Used to convert constraints.
         let mut id_to_var = HashMap::<u64, Variable>::new();
 
@@ -37,28 +31,18 @@ impl<'a, E: Engine> Circuit<E> for ZKIFCircuit<'a> {
         let public_vars = self.messages.connection_variables().unwrap();
 
         for var in public_vars {
-            let mut cs = cs.namespace(|| format!("public_{}", var.id));
-            let num = AllocatedNum::alloc(&mut cs, || {
-                Ok(le_to_fr::<E>(var.value))
-            })?;
-
-            num.inputize(&mut cs)?;
-
+            let var = cs.alloc_input(|| format!("public_{}", var.id), || Ok(le_to_fr::<F>(var.value)))?;
             // Track input variable.
-            id_to_var.insert(var.id, num.get_variable());
+            id_to_var.insert(var.id, var);
         }
 
         // Allocate private variables, with optional values.
         let private_vars = self.messages.private_variables().unwrap();
 
         for var in private_vars {
-            let num = AllocatedNum::alloc(
-                cs.namespace(|| format!("private_{}", var.id)), || {
-                    Ok(le_to_fr::<E>(var.value))
-                })?;
-
-            // Track private variable.
-            id_to_var.insert(var.id, num.get_variable());
+            let var = cs.alloc(|| format!("public_{}", var.id), || Ok(le_to_fr::<F>(var.value)))?;
+            // Track input variable.
+            id_to_var.insert(var.id, var);
         };
 
         for (i, constraint) in self.messages.iter_constraints().enumerate() {
